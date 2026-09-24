@@ -15,7 +15,7 @@ ARK_API_KEY=你的火山方舟密钥 HF_ENDPOINT=https://huggingface.co uvicorn 
 
 小组件选择相册图片时优先请求压缩版本；后台接收上限为 20 MB。超限返回 HTTP 413 和 `照片不能超过 20 MB`，小组件会显示该具体原因。
 
-`POST /generate` 接收 `file` 和 `fishId` 表单字段。服务将上传照片作为图一、匹配到的 `images/{fishId}.png` 作为图二，以固定提示词调用火山方舟 `doubao-seedream-5-0-flash-260915` 多图生图接口。服务会立即下载生成图并保存在 `.results/`，返回本站 `imageUrl`；地址 24 小时后失效，旧文件会在后续生成时清理。未配置 `ARK_API_KEY` 时返回 HTTP 503。生成会调用付费模型，并将两张参考图发送至火山引擎；匹配接口仍只在内存中处理上传照片。
+`POST /generate` 接收 `file` 和 `fishId` 表单字段。服务将上传照片作为图一、匹配到的 `images/{fishId}.png` 作为图二，以固定提示词调用火山方舟 `doubao-seedream-5-0-flash-260915` 多图生图接口。服务会立即下载成图，将每次成功生成的 PNG 与生成时间、鱼编号、模型和提示词等 JSON 信息保存在 `generated_archive/`，返回本站 `imageUrl`。**留档不设自动过期或清理**；原有 `.results/` 文件也保留并继续可访问。归档目录被 Git 忽略，迁移或备份服务时需连同此目录一起复制。未配置 `ARK_API_KEY` 时返回 HTTP 503。生成会调用付费模型，并将两张参考图发送至火山引擎；匹配接口仍只在内存中处理上传照片。
 
 对公网开放前，应在 HTTPS 网关给 `/match` 和 `/generate` 设置请求体大小、调用频率和每日生成预算限制，避免公开生成接口被滥用。
 

@@ -1,6 +1,7 @@
 import base64
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 from urllib.error import URLError
 
@@ -87,7 +88,7 @@ def test_match_reaches_ranker_for_two_real_faces(monkeypatch):
 
 def test_generation_requires_ark_key(monkeypatch, tmp_path):
     monkeypatch.delenv("ARK_API_KEY", raising=False)
-    monkeypatch.setattr(service, "RESULTS", tmp_path)
+    monkeypatch.setattr(service, "ARCHIVE", tmp_path)
     photo = BytesIO()
     Image.new("RGB", (64, 64), (23, 145, 201)).save(photo, format="PNG")
 
@@ -104,7 +105,7 @@ def test_generation_requires_ark_key(monkeypatch, tmp_path):
 
 def test_generation_sends_portrait_first_and_fish_second(monkeypatch, tmp_path):
     monkeypatch.setenv("ARK_API_KEY", "test-key")
-    monkeypatch.setattr(service, "RESULTS", tmp_path)
+    monkeypatch.setattr(service, "ARCHIVE", tmp_path)
     portrait = BytesIO()
     Image.new("RGB", (64, 64), (23, 145, 201)).save(portrait, format="PNG")
     generated = BytesIO()
@@ -149,11 +150,17 @@ def test_generation_sends_portrait_first_and_fish_second(monkeypatch, tmp_path):
     result = client.get(response.json()["imageUrl"])
     assert result.status_code == 200
     assert Image.open(BytesIO(result.content)).getpixel((20, 20)) == (201, 45, 23)
+    token = response.json()["imageUrl"].rsplit("/", 1)[-1]
+    metadata = json.loads((tmp_path / f"{token}.json").read_text(encoding="utf-8"))
+    assert metadata["fishId"] == "22"
+    assert metadata["prompt"] == service.GENERATION_PROMPT
+    assert metadata["imageOrder"] == ["uploaded_portrait", "images/22.png"]
+    assert metadata["size"] == {"width": 64, "height": 64}
 
 
 def test_generation_provider_failure_returns_error_without_saving_photo(monkeypatch, tmp_path):
     monkeypatch.setenv("ARK_API_KEY", "test-key")
-    monkeypatch.setattr(service, "RESULTS", tmp_path)
+    monkeypatch.setattr(service, "ARCHIVE", tmp_path)
     monkeypatch.setattr(
         service, "urlopen", lambda _request, timeout: (_ for _ in ()).throw(URLError("offline"))
     )
@@ -172,7 +179,7 @@ def test_generation_provider_failure_returns_error_without_saving_photo(monkeypa
 
 
 def test_generate_rejects_invalid_fish_id(monkeypatch, tmp_path):
-    monkeypatch.setattr(service, "RESULTS", tmp_path)
+    monkeypatch.setattr(service, "ARCHIVE", tmp_path)
     photo = BytesIO()
     Image.new("RGB", (64, 64), "green").save(photo, format="PNG")
     response = client.post(
@@ -184,7 +191,7 @@ def test_generate_rejects_invalid_fish_id(monkeypatch, tmp_path):
 
 
 def test_generation_accepts_image_larger_than_old_8mb_limit(monkeypatch, tmp_path):
-    monkeypatch.setattr(service, "RESULTS", tmp_path)
+    monkeypatch.setattr(service, "ARCHIVE", tmp_path)
     monkeypatch.setattr(
         service, "generate_with_ark", lambda _portrait, _fish: Image.new("RGB", (8, 8), "red")
     )
@@ -198,3 +205,16 @@ def test_generation_accepts_image_larger_than_old_8mb_limit(monkeypatch, tmp_pat
         files={"file": ("portrait.png", padded_photo, "image/png")},
     )
     assert response.status_code == 200
+
+
+def test_archived_result_remains_available_after_24_hours(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "ARCHIVE", tmp_path)
+    image = Image.new("RGB", (16, 16), "green")
+    token = service.archive_generated_image(image, "22")
+    path = tmp_path / f"{token}.png"
+    old_timestamp = path.stat().st_mtime - 3 * 24 * 60 * 60
+    os.utime(path, (old_timestamp, old_timestamp))
+
+    response = client.get(f"/result/{token}")
+    assert response.status_code == 200
+    assert Image.open(BytesIO(response.content)).getpixel((8, 8)) == (0, 128, 0)
