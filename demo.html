@@ -18,10 +18,14 @@
   <p>上传一张包含清晰人脸的照片，看看今天会遇见哪条鱼。</p>
   <form id="form"><input name="file" type="file" accept="image/jpeg,image/png,image/webp" required><button>开始趣味匹配</button></form>
   <p id="status" role="status"></p>
-  <section id="result"><h2>匹配到了 <span id="name"></span> 号路人鱼</h2><img id="fish" src="/images/02.png" alt="匹配到的路人鱼"><p><small>这是娱乐性质的视觉匹配结果，不代表人脸身份或科学相似度。</small></p><p><small>假生图会将原照片暂存到本服务，并返回有效期 24 小时的图片 URL。</small></p><button id="generate" type="button">生成图片 URL</button><a id="download" style="display:none" download="我的路人鱼.png">查看并下载图片</a></section>
+  <section id="result"><h2>匹配到了 <span id="name"></span> 号路人鱼</h2><img id="fish" src="/images/02.png" alt="匹配到的路人鱼"><p><small>这是娱乐性质的视觉匹配结果，不代表人脸身份或科学相似度。</small></p><p><small>点击生成后，照片和匹配到的路人鱼图片会发送至火山引擎；生成结果在本服务保留 24 小时。</small></p><button id="generate" type="button">生成比奇堡邻居形象</button><a id="download" style="display:none" download="我的路人鱼.png">查看并下载图片</a></section>
 </main>
 <script>
   let selectedFishId = '';
+  document.querySelector('input[name=file]').addEventListener('change', () => {
+    selectedFishId = '';
+    document.querySelector('#result').style.display = 'none';
+  });
   document.querySelector('#form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -47,18 +51,18 @@
     const file = document.querySelector('input[name=file]').files[0];
     if (!selectedFishId || !file) return;
     button.disabled = true;
-    status.textContent = '正在生成图片 URL…';
+    status.textContent = '正在生成比奇堡邻居形象，可能需要一两分钟…';
     try {
       const body = new FormData();
       body.append('file', file);
       body.append('fishId', selectedFishId);
       const response = await fetch('/generate', { method: 'POST', body });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || '生成失败');
+      if (!response.ok) throw new Error(data.detail?.message || data.detail || '生成失败');
       document.querySelector('#fish').src = data.imageUrl;
       document.querySelector('#download').href = data.imageUrl;
       document.querySelector('#download').style.display = 'inline';
-      status.textContent = '图片 URL 已生成';
+      status.textContent = '形象已生成';
     } catch (error) { status.textContent = error.message; }
     finally { button.disabled = false; }
   });

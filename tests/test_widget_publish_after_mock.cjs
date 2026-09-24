@@ -24,7 +24,7 @@ global.xhs = {
     uploadedTo = options.url;
     options.success({
       statusCode: 200,
-      data: JSON.stringify({ imageUrl: 'https://api.example.test/result/abc.png', mock: true })
+      data: JSON.stringify({ imageUrl: 'https://api.example.test/result/abc.png' })
     });
   },
   postNote(options) { published = options; }
@@ -37,4 +37,4 @@ page.publishNote();
 
 assert.equal(uploadedTo, 'https://api.example.test/generate');
 assert.equal(JSON.parse(published.mediaInfo).image_resources[0].url, 'https://api.example.test/result/abc.png');
-console.log('publish generates a URL then opens the editor');
+console.log('publish generates an image URL then opens the editor');
