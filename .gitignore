@@ -1,0 +1,6 @@
+.results/
+__pycache__/
+.pytest_cache/
+.impeccable/
+.DS_Store
+*.pyc

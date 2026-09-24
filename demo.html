@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>比奇堡路人鱼趣味匹配</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: #e6faff; color: #16374c; }
+  main { max-width: 480px; margin: 48px auto; padding: 28px; background: white; border-radius: 24px; box-shadow: 0 16px 48px #0000001a; }
+  h1 { margin-top: 0; }
+  input, button { width: 100%; box-sizing: border-box; margin: 12px 0; }
+  button { border: 0; border-radius: 12px; padding: 14px; background: #02a6c6; color: white; font: inherit; cursor: pointer; }
+  img { display: block; width: 100%; max-height: 350px; object-fit: contain; border-radius: 16px; }
+  #result { display: none; }
+  small { color: #678; }
+</style>
+<main>
+  <h1>你的比奇堡路人鱼 🫧</h1>
+  <p>上传一张包含清晰人脸的照片，看看今天会遇见哪条鱼。</p>
+  <form id="form"><input name="file" type="file" accept="image/jpeg,image/png,image/webp" required><button>开始趣味匹配</button></form>
+  <p id="status" role="status"></p>
+  <section id="result"><h2>匹配到了 <span id="name"></span> 号路人鱼</h2><img id="fish" src="/images/02.png" alt="匹配到的路人鱼"><p><small>这是娱乐性质的视觉匹配结果，不代表人脸身份或科学相似度。</small></p><p><small>假生图会将原照片暂存到本服务，并返回有效期 24 小时的图片 URL。</small></p><button id="generate" type="button">生成图片 URL</button><a id="download" style="display:none" download="我的路人鱼.png">查看并下载图片</a></section>
+</main>
+<script>
+  let selectedFishId = '';
+  document.querySelector('#form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = document.querySelector('#status');
+    const result = document.querySelector('#result');
+    status.textContent = '正在匹配，首次运行会下载模型，可能需要几分钟…';
+    result.style.display = 'none';
+    try {
+      const response = await fetch('/match', { method: 'POST', body: new FormData(form) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail?.message || data.detail || '匹配失败');
+      document.querySelector('#name').textContent = data.match.id;
+      document.querySelector('#fish').src = data.match.imageUrl;
+      selectedFishId = data.match.id;
+      document.querySelector('#download').style.display = 'none';
+      result.style.display = 'block';
+      status.textContent = '';
+    } catch (error) { status.textContent = error.message; }
+  });
+  document.querySelector('#generate').addEventListener('click', async () => {
+    const status = document.querySelector('#status');
+    const button = document.querySelector('#generate');
+    const file = document.querySelector('input[name=file]').files[0];
+    if (!selectedFishId || !file) return;
+    button.disabled = true;
+    status.textContent = '正在生成图片 URL…';
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      body.append('fishId', selectedFishId);
+      const response = await fetch('/generate', { method: 'POST', body });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || '生成失败');
+      document.querySelector('#fish').src = data.imageUrl;
+      document.querySelector('#download').href = data.imageUrl;
+      document.querySelector('#download').style.display = 'inline';
+      status.textContent = '图片 URL 已生成';
+    } catch (error) { status.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+</script>
+</html>
