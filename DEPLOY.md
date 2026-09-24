@@ -10,8 +10,8 @@ FastAPI 单体服务，提供三个接口和一个演示页：
 | --- | --- |
 | `GET /` | 演示页（demo.html） |
 | `POST /match` | 上传人脸照片 → YuNet 计数人脸 → CLIP 与 40 张单鱼图排序，返回匹配结果 |
-| `POST /generate` | 上传照片 + fishId → 调火山方舟 seedream 多图生图 → 返回本站 24 小时有效的图片 URL |
-| `GET /result/{token}` | 输出已生成的图片 |
+| `POST /generate` | 上传照片 + fishId → 调火山方舟 seedream 多图生图 → 返回本站图片 URL，生成结果永久留档 |
+| `GET /result/{token}` | 输出已生成的图片（读 `generated_archive/`，旧 `.results/` 文件仍兼容可访问） |
 
 模型与素材全部随仓库分发：`models/face_detection_yunet_2026may.onnx`（人脸检测）和 `images/`（40 张单鱼图）。
 只有 CLIP 模型（`openai/clip-vit-base-patch32`，约 600 MB）在首次有效匹配时从 HuggingFace 下载，缓存在服务器用户目录 `~/.cache/huggingface`。
@@ -19,7 +19,7 @@ FastAPI 单体服务，提供三个接口和一个演示页：
 ## 二、服务器要求
 
 - 操作系统：Linux（Ubuntu 20.04+ / Debian 11+ 均可）。
-- 配置：2 核 CPU、4 GB 内存、20 GB 以上磁盘。纯 CPU 推理即可，CLIP ViT-B/32 单张图编码在百毫秒量级；2 GB 内存机器在加载 torch + CLIP 后会很紧张，不建议。
+- 配置：2 核 CPU、4 GB 内存、20 GB 以上磁盘。纯 CPU 推理即可，CLIP ViT-B/32 单张图编码在百毫秒量级；2 GB 内存机器在加载 torch + CLIP 后会很紧张，不建议。磁盘需给 `generated_archive/` 留出增长空间（生成结果永久留档，见第五节）。
 - Python：3.10 – 3.12（`python3 --version` 确认）。
 - 出网：需能访问 HuggingFace（或其镜像）下载 CLIP 模型；调用 `/generate` 需能访问火山引擎北京接口 `ark.cn-beijing.volces.com`。
 
@@ -144,7 +144,7 @@ README 中已约定，公开暴露前必须做：
 1. **请求体限制**：Nginx `client_max_body_size`（上面已配）。
 2. **限频**：`/match`、`/generate` 都加 `limit_req`；`/generate` 调用付费模型，建议额外按天在网关层限次。
 3. **每日生成预算**：在 Nginx（`limit_req_zone` + 日志脚本）或网关侧控制每天 `/generate` 总调用次数，防止被盗刷产生费用。
-4. 上传照片只在内存中处理、生成结果 24 小时后由服务自动清理（`.results/`），无需额外运维；磁盘紧张时可监控该目录大小。
+4. **生成结果永久留档**：每次成功生成都会把 PNG 和对应的 JSON 元数据写入 `generated_archive/`（已被 Git 忽略），服务不会自动清理，磁盘占用只增不减——需监控该目录大小并预留空间；迁移或备份服务时必须连同此目录一起复制，否则历史生成链接会失效。旧 `.results/` 目录里的历史文件也继续保留、仍可通过 `/result/` 访问。
 
 ## 六、部署验证
 
