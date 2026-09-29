@@ -91,15 +91,19 @@ def test_update_daily_limit_takes_effect_without_restart(monkeypatch):
                       headers=headers).json() == {"limit": 2, "used": 2, "remaining": 0}
 
 
-def test_generation_toggle_stops_generate_but_not_match():
+def test_generation_toggle_returns_placeholder_but_match_works():
     client = admin_client()
     assert client.post("/admin/api/config",
                        json={"generation_enabled": False}).status_code == 200
 
     response = client.post("/generate", data={"fishId": "22", "openid": "config-user"},
                            files=photo())
-    assert response.status_code == 503
-    assert response.json()["detail"] == "图片生成已临时关闭，请稍后再来"
+    # 开关关闭后不再 503：随机回一张现成路人鱼图，前端流程照常。
+    assert response.status_code == 200
+    token = response.json()["imageUrl"].rsplit("/", 1)[-1]
+    metadata = json.loads((service.ARCHIVE / f"{token}.json").read_text(encoding="utf-8"))
+    assert metadata["mock"] is True
+    assert metadata["fishId"] in {path.stem for path in service.FISH}
 
     with FACE_SAMPLE.open("rb") as handle:
         matched = client.post("/match", files={"file": ("face.jpg", handle.read(), "image/jpeg")})

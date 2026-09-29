@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import random
 from time import perf_counter
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
@@ -35,6 +36,7 @@ FISH = sorted(IMAGES.glob("*.png"))
 Image.MAX_IMAGE_PIXELS = 20_000_000
 RESULTS = ROOT / ".results"
 ARCHIVE = ROOT / "generated_archive"
+# 对外出图用无损 WebP；PNG 原图仅留档，不再直接对外。
 ARK_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
 # 默认值；后台“运行时配置”里保存过的值会覆盖它们（见 runtime_config.py）。
 ARK_MODEL = runtime_config.SPEC["ark_model"]["default"]
@@ -220,6 +222,9 @@ def archive_generated_image(
     pending_path = ARCHIVE / f"{token}.pending.png"
     image.save(pending_path, format="PNG")
     os.replace(pending_path, image_path)
+    webp_pending = ARCHIVE / f"{token}.webp.pending"
+    image.save(webp_pending, format="WEBP", lossless=True, method=6)
+    os.replace(webp_pending, ARCHIVE / f"{token}.webp")
     thumbnail = image.copy()
     thumbnail.thumbnail((320, 320))
     thumb_pending = ARCHIVE / f"{token}.thumb.pending.jpg"
@@ -243,11 +248,45 @@ def archive_generated_image(
     return token
 
 
+def archive_placeholder_image(
+    fish_path: Path, fish_id: str, vid: str | None = None,
+    ip_hash: str | None = None, open_id: str | None = None,
+) -> str:
+    """生图开关关闭时的占位结果：不调用 Ark，直接把一张现成路人鱼图存为本次结果。"""
+    ARCHIVE.mkdir(parents=True, exist_ok=True)
+    token = uuid4().hex
+    webp_pending = ARCHIVE / f"{token}.webp.pending"
+    # images/ 里已有现成的 webp 版本；直接拷字节，避免把 PNG 字节当 webp 存。
+    webp_src = IMAGES / f"{fish_id}.webp"
+    if webp_src.is_file():
+        webp_pending.write_bytes(webp_src.read_bytes())
+    else:
+        Image.open(fish_path).convert("RGB").save(
+            webp_pending, format="WEBP", lossless=True, method=6
+        )
+    os.replace(webp_pending, ARCHIVE / f"{token}.webp")
+    metadata = {
+        "id": token,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "fishId": fish_id,
+        "model": "placeholder",
+        "prompt": None,
+        "imageOrder": [f"images/{fish_id}.png"],
+        "size": None,
+        "mock": True,
+        "vid": vid,
+        "ipHash": ip_hash,
+        "openId": open_id,
+    }
+    (ARCHIVE / f"{token}.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return token
+
+
 @app.post("/generate")
 async def generate(request: Request, fishId: str = Form(...), file: UploadFile = File(...),
                    openid: str | None = Form(None)):
-    if not runtime_config.get("generation_enabled"):
-        raise HTTPException(503, "图片生成已临时关闭，请稍后再来")
     open_id = None
     if widget_auth.auth_enabled():
         open_id = await run_in_threadpool(
@@ -258,12 +297,19 @@ async def generate(request: Request, fishId: str = Form(...), file: UploadFile =
         raise HTTPException(400, "无效的路人鱼编号")
 
     portrait = await read_image(file)
+    vid = request.cookies.get("vid")
+    ip_hash = client_ip_hash(request)
     attempt_id = await run_in_threadpool(widget_auth.reserve, open_id) if open_id else None
     try:
-        generated = await run_in_threadpool(generate_with_ark, portrait, fish_path)
-        vid = request.cookies.get("vid")
-        ip_hash = client_ip_hash(request)
-        token = await run_in_threadpool(archive_generated_image, generated, fishId, vid, ip_hash, open_id)
+        if not runtime_config.get("generation_enabled"):
+            # 后台开关关闭：不调 Ark，随机回一张现成路人鱼图，前端流程照常。
+            placeholder = random.choice(FISH)
+            token = await run_in_threadpool(
+                archive_placeholder_image, placeholder, placeholder.stem, vid, ip_hash, open_id
+            )
+        else:
+            generated = await run_in_threadpool(generate_with_ark, portrait, fish_path)
+            token = await run_in_threadpool(archive_generated_image, generated, fishId, vid, ip_hash, open_id)
     except Exception:
         if attempt_id:
             await run_in_threadpool(widget_auth.finish, attempt_id, False)
@@ -278,9 +324,11 @@ async def generate(request: Request, fishId: str = Form(...), file: UploadFile =
 def get_result(token: str):
     if len(token) != 32 or not all(char in "0123456789abcdef" for char in token):
         raise HTTPException(404)
-    path = ARCHIVE / f"{token}.png"
-    if not path.is_file():
-        path = RESULTS / f"{token}.png"
-    if not path.is_file():
-        raise HTTPException(404)
-    return FileResponse(path, media_type="image/png")
+    for base in (ARCHIVE, RESULTS):
+        webp = base / f"{token}.webp"
+        if webp.is_file():
+            return FileResponse(webp, media_type="image/webp")
+        png = base / f"{token}.png"
+        if png.is_file():
+            return FileResponse(png, media_type="image/png")
+    raise HTTPException(404)

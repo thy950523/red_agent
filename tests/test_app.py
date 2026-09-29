@@ -179,6 +179,34 @@ def test_generation_requires_ark_key(monkeypatch, tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+def test_generation_disabled_returns_random_fish(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "ARCHIVE", tmp_path)
+    force_runtime_config(monkeypatch, generation_enabled=False)
+
+    def fail_urlopen(*_args, **_kwargs):
+        raise AssertionError("Ark must not be called when generation is disabled")
+
+    monkeypatch.setattr(service, "urlopen", fail_urlopen)
+    photo = BytesIO()
+    Image.new("RGB", (64, 64), "green").save(photo, format="PNG")
+
+    response = client.post(
+        "/generate",
+        data={"fishId": "22", "openid": "existing-test-user"},
+        files={"file": ("portrait.png", photo.getvalue(), "image/png")},
+    )
+
+    assert response.status_code == 200
+    token = response.json()["imageUrl"].rsplit("/", 1)[-1]
+    metadata = json.loads((tmp_path / f"{token}.json").read_text(encoding="utf-8"))
+    assert metadata["mock"] is True
+    assert metadata["prompt"] is None
+    # 返回的就是 images 目录里现成的路人鱼图，字节与原图 webp 一致。
+    result = client.get(response.json()["imageUrl"])
+    assert result.status_code == 200
+    assert result.content == (service.IMAGES / f"{metadata['fishId']}.webp").read_bytes()
+
+
 def test_generation_sends_portrait_first_and_fish_second(monkeypatch, tmp_path):
     monkeypatch.setenv("ARK_API_KEY", "test-key")
     monkeypatch.setattr(service, "ARCHIVE", tmp_path)
