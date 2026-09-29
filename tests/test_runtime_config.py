@@ -64,7 +64,7 @@ def test_config_api_requires_admin_login():
 def test_get_config_returns_effective_defaults_without_overrides():
     client = admin_client()
     data = client.get("/admin/api/config").json()
-    assert data["values"]["daily_limit"] == 5
+    assert data["values"]["daily_limit"] == 100
     assert data["values"]["generation_size"] == "2K"
     assert data["values"]["watermark"] is False
     assert data["values"]["generation_prompt"] == service.GENERATION_PROMPT
@@ -148,7 +148,7 @@ def test_null_value_resets_override():
     client.post("/admin/api/config", json={"daily_limit": 9})
     assert client.get("/admin/api/config").json()["values"]["daily_limit"] == 9
     data = client.post("/admin/api/config", json={"daily_limit": None}).json()
-    assert data["values"]["daily_limit"] == 5
+    assert data["values"]["daily_limit"] == 100
     assert "daily_limit" not in data["overridden"]
 
 
@@ -163,6 +163,33 @@ def test_auth_enabled_override_beats_environment(monkeypatch):
     assert client.get("/auth/config").json()["authEnabled"] is False
     response = client.post("/generate", data={"fishId": "22"}, files=photo())
     assert response.status_code == 200  # 游客模式不要求登录
+
+
+def test_guest_mode_returns_fixed_openid_and_shared_daily_quota():
+    client = admin_client()
+    assert client.post("/admin/api/config", json={"auth_enabled": False}).status_code == 200
+
+    # 关闭登录后 /auth/config 直接下发带标识的固定游客 openid
+    config = client.get("/auth/config").json()
+    assert config["authEnabled"] is False
+    assert "未开启小红书登录" in config["openid"]
+    guest_open_id = config["openid"]
+
+    # /auth/xhs 不再 400：返回固定 openid（无会话）和共享限额
+    login = client.post("/auth/xhs", json={"code": "whatever"})
+    assert login.status_code == 200
+    body = login.json()
+    assert body["token"] is None
+    assert body["openid"] == guest_open_id
+    assert body["quota"] == {"limit": 100, "used": 0, "remaining": 100}
+
+    # 游客共享限额真实生效：调低上限后超额请求被 429 拦下
+    assert client.post("/admin/api/config", json={"daily_limit": 2}).status_code == 200
+    for _ in range(2):
+        assert client.post("/generate", data={"fishId": "22"}, files=photo()).status_code == 200
+    denied = client.post("/generate", data={"fishId": "22"}, files=photo())
+    assert denied.status_code == 429
+    assert client.get("/auth/quota").json() == {"limit": 2, "used": 2, "remaining": 0}
 
 
 def test_post_note_params_reach_widget_and_reset_to_empty():

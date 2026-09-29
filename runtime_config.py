@@ -35,7 +35,8 @@ def _auth_enabled_default() -> bool:
 SPEC: dict[str, dict] = {
     "generation_enabled": {"type": "bool", "default": True},
     "auth_enabled": {"type": "bool", "default": _auth_enabled_default},
-    "daily_limit": {"type": "int", "default": 5, "min": 1, "max": 200},
+    # 每个用户每天可生成的图片数；游客模式下所有匿名请求共享固定游客 openid，即全站共享此额度。
+    "daily_limit": {"type": "int", "default": 100, "min": 1, "max": 1000},
     "max_upload_mb": {"type": "int", "default": 20, "min": 1, "max": 50},
     "session_days": {"type": "int", "default": 7, "min": 1, "max": 90},
     "pending_minutes": {"type": "int", "default": 10, "min": 1, "max": 1440},

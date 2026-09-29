@@ -7,6 +7,7 @@ from PIL import Image
 import pytest
 
 import app as service
+import runtime_config
 import widget_auth
 
 
@@ -19,6 +20,14 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(widget_auth, "exchange_code", lambda code: f"open-id-{code}")
     monkeypatch.setattr(service, "generate_with_ark", lambda _portrait, _fish: Image.new("RGB", (8, 8), "red"))
     return TestClient(service.app)
+
+
+def cap_daily_limit(monkeypatch, limit=5):
+    """把每日限额临时调小，避免为触发 429 而真实跑满默认的 100 次。"""
+    real_get = runtime_config.get
+    monkeypatch.setattr(
+        runtime_config, "get", lambda key: limit if key == "daily_limit" else real_get(key)
+    )
 
 
 def photo():
@@ -35,7 +44,8 @@ def generate(client, token, openid="open-id-alice"):
     )
 
 
-def test_login_and_daily_limit_are_tied_to_verified_open_id(client):
+def test_login_and_daily_limit_are_tied_to_verified_open_id(client, monkeypatch):
+    cap_daily_limit(monkeypatch)
     assert generate(client, "").status_code == 401
     login = client.post("/auth/xhs", json={"code": "alice"})
     assert login.status_code == 200
@@ -61,6 +71,7 @@ def test_login_and_daily_limit_are_tied_to_verified_open_id(client):
 
 
 def test_failed_generation_releases_quota(client, monkeypatch):
+    cap_daily_limit(monkeypatch)
     token = client.post("/auth/xhs", json={"code": "alice"}).json()["token"]
     def failure(_portrait, _fish):
         raise service.HTTPException(502, "generation failed")
@@ -69,19 +80,44 @@ def test_failed_generation_releases_quota(client, monkeypatch):
     assert client.get("/auth/quota?openid=open-id-alice", headers={"Authorization": f"Bearer {token}"}).json()["remaining"] == 5
 
 
-def test_local_mode_skips_login_and_quota(client, monkeypatch):
+def test_guest_mode_returns_fixed_openid_and_enforces_shared_quota(client, monkeypatch):
+    cap_daily_limit(monkeypatch, 2)
     monkeypatch.setenv("WIDGET_AUTH_ENABLED", "0")
-    assert client.get("/auth/config").json()["authEnabled"] is False
+    config = client.get("/auth/config").json()
+    assert config["authEnabled"] is False
+    guest = config["openid"]
+    assert "未开启小红书登录" in guest
+
+    # 关闭登录后 /auth/xhs 不再 400：返回固定 openid（无会话）和共享限额
+    login = client.post("/auth/xhs", json={"code": "ignored"})
+    assert login.status_code == 200
+    assert login.json() == {
+        "token": None, "openid": guest,
+        "quota": {"limit": 2, "used": 0, "remaining": 2},
+    }
+    assert client.get("/auth/quota").json() == {"limit": 2, "used": 0, "remaining": 2}
+
     response = client.post(
         "/generate", data={"fishId": "22"},
         files={"file": ("portrait.png", photo(), "image/png")},
     )
     assert response.status_code == 200
-    assert response.json()["quota"] is None
-    assert not widget_auth.db_path().exists()
+    assert response.json()["quota"] == {"limit": 2, "used": 1, "remaining": 1}
+    assert client.get("/auth/quota").json() == {"limit": 2, "used": 1, "remaining": 1}
+
+    # 所有匿名请求共享同一个游客 openid 的每日限额
+    assert client.post(
+        "/generate", data={"fishId": "22"},
+        files={"file": ("portrait.png", photo(), "image/png")},
+    ).status_code == 200
+    assert client.post(
+        "/generate", data={"fishId": "22"},
+        files={"file": ("portrait.png", photo(), "image/png")},
+    ).status_code == 429
 
 
 def test_reservations_are_atomic_and_reset_next_day(client, monkeypatch):
+    cap_daily_limit(monkeypatch)
     widget_auth.connect().close()  # Initialize schema before concurrent reservations.
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda _: _reserve_result("same-open-id"), range(12)))

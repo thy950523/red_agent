@@ -156,8 +156,8 @@ let configOverridden = new Set();
 const CONFIG_GROUPS = [
   { name: '运营开关', items: [
     { key: 'generation_enabled', label: '生成功能开关', type: 'bool', hint: '关闭后立即停止出图，照片匹配不受影响' },
-    { key: 'auth_enabled', label: '小红书登录开关', type: 'bool', hint: '关闭即游客模式：无需登录、也不限生成次数' },
-    { key: 'daily_limit', label: '每人每天生成上限', type: 'int', min: 1, max: 200, hint: '按北京时间零点重置' },
+    { key: 'auth_enabled', label: '小红书登录开关', type: 'bool', hint: '关闭即游客模式：统一返回固定游客 openid（含“未开启小红书登录”标识），全站共享每日限额' },
+    { key: 'daily_limit', label: '每人每天生成上限', type: 'int', min: 1, max: 1000, hint: '游客模式下为全站共享上限；按北京时间零点重置' },
     { key: 'max_upload_mb', label: '上传照片上限 (MB)', type: 'int', min: 1, max: 50 },
   ]},
   { name: '生图设置', items: [

@@ -55,8 +55,11 @@ class LoginCode(BaseModel):
 
 @app.get("/auth/config")
 def get_widget_auth_config():
+    auth_on = widget_auth.auth_enabled()
     return {
-        "authEnabled": widget_auth.auth_enabled(),
+        "authEnabled": auth_on,
+        # 认证关闭（游客模式）时直接下发固定游客 openid，前端无需再走登录。
+        "openid": None if auth_on else widget_auth.GUEST_OPEN_ID,
         # 小组件发布笔记时预填的标题/正文/话题，后台「小红书发布」可改。
         "postNote": {
             "title": runtime_config.get("post_note_title"),
@@ -69,7 +72,10 @@ def get_widget_auth_config():
 @app.post("/auth/xhs")
 async def login_widget(payload: LoginCode):
     if not widget_auth.auth_enabled():
-        raise HTTPException(400, "本地开发模式无需登录")
+        # 游客模式：不下发会话，返回带“未开启登录”标识的固定 openid 和共享限额。
+        guest = widget_auth.GUEST_OPEN_ID
+        return {"token": None, "openid": guest,
+                "quota": await run_in_threadpool(widget_auth.quota, guest)}
     if not payload.code or len(payload.code) > 256:
         raise HTTPException(400, "登录凭证无效")
     open_id = await run_in_threadpool(widget_auth.exchange_code, payload.code)
@@ -81,7 +87,7 @@ async def login_widget(payload: LoginCode):
 @app.get("/auth/quota")
 async def get_widget_quota(request: Request, openid: str | None = None):
     if not widget_auth.auth_enabled():
-        return {"limit": None, "used": 0, "remaining": None}
+        return await run_in_threadpool(widget_auth.quota, widget_auth.GUEST_OPEN_ID)
     open_id = await run_in_threadpool(
         widget_auth.require_matching_open_id, request.headers.get("authorization"), openid
     )
@@ -287,11 +293,13 @@ def archive_placeholder_image(
 @app.post("/generate")
 async def generate(request: Request, fishId: str = Form(...), file: UploadFile = File(...),
                    openid: str | None = Form(None)):
-    open_id = None
     if widget_auth.auth_enabled():
         open_id = await run_in_threadpool(
             widget_auth.require_matching_open_id, request.headers.get("authorization"), openid
         )
+    else:
+        # 游客模式：所有匿名请求共享同一个固定 openid 的每日限额。
+        open_id = widget_auth.GUEST_OPEN_ID
     fish_path = next((path for path in FISH if path.stem == fishId), None)
     if fish_path is None:
         raise HTTPException(400, "无效的路人鱼编号")

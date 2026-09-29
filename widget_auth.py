@@ -19,6 +19,9 @@ from fastapi import HTTPException
 
 ROOT = Path(__file__).resolve().parent
 TZ_CN = timezone(timedelta(hours=8))
+# 认证关闭（游客模式）时统一使用的固定 openid；标识直接写进 openid 本身，
+# 后台统计和出图存档里一眼就能认出这是未走小红书登录的游客流量。
+GUEST_OPEN_ID = "guest:未开启小红书登录"
 XHS_BASE = "https://miniapp.xiaohongshu.com/api/rmp"
 _access_token = ""
 _access_token_expires = 0.0
