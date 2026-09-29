@@ -29,6 +29,12 @@ def authenticated_generation(monkeypatch, tmp_path):
     monkeypatch.setenv("GENERATION_DB_PATH", str(tmp_path.parent / f"{tmp_path.name}-quota.sqlite3"))
     monkeypatch.setenv("RUNTIME_CONFIG_PATH", str(tmp_path.parent / f"{tmp_path.name}-runtime-config.json"))
     monkeypatch.setattr(service.widget_auth, "require_open_id", lambda _header: "existing-test-user")
+    real_get = runtime_config.get
+    monkeypatch.setattr(
+        runtime_config, "get",
+        lambda key: 0 if key == "admin_login_rate_limit_seconds" else real_get(key),
+    )
+    stats_admin._login_attempts.clear()
 
 
 def force_runtime_config(monkeypatch, **overrides):

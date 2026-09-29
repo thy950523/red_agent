@@ -47,6 +47,8 @@ SPEC: dict[str, dict] = {
     "session_days": {"type": "int", "default": 7, "min": 1, "max": 90},
     "pending_minutes": {"type": "int", "default": 10, "min": 1, "max": 1440},
     "admin_session_days": {"type": "int", "default": 7, "min": 1, "max": 90},
+    # 同一 IP 两次 /admin/login 的最小间隔；0 关闭限速。
+    "admin_login_rate_limit_seconds": {"type": "int", "default": 3, "min": 0, "max": 60},
     "admin_password": {"type": "str", "default": "", "max_length": 128},
     "generation_prompt": {"type": "str", "default": GENERATION_PROMPT_DEFAULT,
                           "max_length": 8000, "required": True},

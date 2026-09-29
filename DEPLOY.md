@@ -55,6 +55,7 @@ pip install -r requirements.txt
 - `GENERATION_DB_PATH`：可选，生成额度 SQLite 文件路径；默认是项目目录下 `.generation_quota.sqlite3`。部署目录必须可写，且应持久化备份。
 - `RUNTIME_CONFIG_PATH`：可选，运行时配置 JSON 路径；默认是项目目录下 `runtime_config.json`（被 Git 忽略）。后台「运行时配置」保存的值写在这里，热加载、即时生效，迁移或备份时需一起复制。
 - `ADMIN_PASSWORD`：`/admin` 数据统计后台的登录密码。不配置时使用内置默认密码 `xiawang123`；公网部署务必显式设置强密码覆盖默认值（也可登录后在后台直接改成自定义密码，优先级高于环境变量）。
+- 后台登录自带防爆破：同一 IP 默认 3 秒只允许一次 `/admin/login` 尝试（后台「登录限速间隔」可调，设 0 关闭），错误密码响应额外延迟 1.5 秒；它是应用层兜底，不能替代 Nginx `limit_req`。
 
 ### 3. 用 systemd 常驻运行
 

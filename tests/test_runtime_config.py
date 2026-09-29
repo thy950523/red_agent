@@ -28,6 +28,12 @@ def isolated_config(monkeypatch, tmp_path):
         service, "generate_with_ark", lambda _portrait, _fish: Image.new("RGB", (8, 8), "red")
     )
     monkeypatch.setattr(service, "ARCHIVE", tmp_path / "archive")
+    real_get = runtime_config.get
+    monkeypatch.setattr(
+        runtime_config, "get",
+        lambda key: 0 if key == "admin_login_rate_limit_seconds" else real_get(key),
+    )
+    stats_admin._login_attempts.clear()
 
 
 def admin_client():
@@ -183,3 +189,82 @@ def test_config_persists_to_configured_path_and_survives_reload(tmp_path):
     assert runtime_config.get("daily_limit") == 7
     assert runtime_config.get("session_days") == 7  # 未覆盖的键仍是默认值
     assert not (service.ROOT / "runtime_config.json").exists()
+
+
+def test_json_login_returns_structured_success_and_failure(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(stats_admin.asyncio, "sleep", instant)
+    client = TestClient(service.app)
+
+    wrong = client.post("/admin/login", data={"password": "nope"},
+                        headers={"Accept": "application/json"})
+    assert wrong.status_code == 401
+    assert wrong.json() == {"ok": False, "message": "密码错误，请重试"}
+
+    right = client.post("/admin/login", data={"password": "pw-secret"},
+                        headers={"Accept": "application/json"})
+    assert right.status_code == 200
+    assert right.json() == {"ok": True, "redirect": "/admin"}
+    assert "admin_session=" in right.headers.get("set-cookie", "")
+    assert client.get("/admin/api/summary").status_code == 200
+
+
+def test_login_rate_limit_blocks_rapid_attempts_from_same_ip(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(stats_admin.asyncio, "sleep", instant)
+    real_get = runtime_config.get
+    monkeypatch.setattr(
+        runtime_config, "get",
+        lambda key: 3 if key == "admin_login_rate_limit_seconds" else real_get(key),
+    )
+    client = TestClient(service.app)
+
+    first = client.post("/admin/login", data={"password": "wrong"})
+    assert first.status_code == 401
+    assert "密码错误" in first.text
+
+    # 同一 IP 3 秒内第二次尝试：HTML 与 JSON 模式都被 429 拦下
+    blocked = client.post("/admin/login", data={"password": "wrong"})
+    assert blocked.status_code == 429
+    assert "尝试过于频繁" in blocked.text
+    blocked_json = client.post("/admin/login", data={"password": "wrong"},
+                               headers={"Accept": "application/json"})
+    assert blocked_json.status_code == 429
+    body = blocked_json.json()
+    assert body["ok"] is False
+    assert "尝试过于频繁" in body["message"]
+
+    # 密码正确也同样受限，防止借成功登录绕过限速
+    blocked_ok = client.post("/admin/login", data={"password": "pw-secret"},
+                             headers={"Accept": "application/json"})
+    assert blocked_ok.status_code == 429
+
+    # 后台把间隔调成 0（关闭限速）后立即恢复
+    monkeypatch.setattr(runtime_config, "get", real_get)
+    allowed = client.post("/admin/login", data={"password": "pw-secret"})
+    assert allowed.status_code == 200
+
+
+def test_rate_limit_is_per_ip(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(stats_admin.asyncio, "sleep", instant)
+    real_get = runtime_config.get
+    monkeypatch.setattr(
+        runtime_config, "get",
+        lambda key: 3 if key == "admin_login_rate_limit_seconds" else real_get(key),
+    )
+    attacker = TestClient(service.app)
+    assert attacker.post("/admin/login", data={"password": "wrong"},
+                         headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 401
+    blocked = attacker.post("/admin/login", data={"password": "wrong"},
+                            headers={"X-Forwarded-For": "203.0.113.9"})
+    assert blocked.status_code == 429
+    other = TestClient(service.app)
+    assert other.post("/admin/login", data={"password": "pw-secret"},
+                      headers={"X-Forwarded-For": "198.51.100.7"}).status_code == 200

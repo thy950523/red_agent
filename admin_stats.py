@@ -8,6 +8,7 @@ the ADMIN_PASSWORD environment variable (or reading .admin_password).
 import asyncio
 import csv
 import hashlib
+import html
 import hmac
 from io import StringIO
 import json
@@ -16,9 +17,11 @@ import math
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
+from time import time
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 import runtime_config
 
@@ -44,6 +47,30 @@ def get_admin_password() -> str:
 
 def _session_ttl() -> timedelta:
     return timedelta(days=runtime_config.get("admin_session_days"))
+
+
+# 登录限速状态：进程内即可——部署约定 --workers 1，Nginx 侧另有限流。
+_login_lock = Lock()
+_login_attempts: dict[str, float] = {}
+_LOGIN_WINDOW = 60.0  # 超过 60 秒没再尝试的 IP 从内存里清掉
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+
+
+def _login_rate_limit_remaining(ip: str, interval: int) -> int:
+    """Seconds this IP must still wait; 0 means allowed (and records the attempt)."""
+    now = time()
+    with _login_lock:
+        for key in [key for key, at in _login_attempts.items() if now - at > _LOGIN_WINDOW]:
+            _login_attempts.pop(key, None)
+        last = _login_attempts.get(ip)
+        if last is not None and now - last < interval:
+            return int(interval - (now - last)) + 1
+        _login_attempts[ip] = now
+        return 0
 
 
 def _signing_key() -> bytes:
@@ -83,8 +110,7 @@ def _require_auth(request: Request) -> None:
 
 
 def _login_page(error: str | None) -> str:
-    error_html = f'<p class="error">{error}</p>' if error else ""
-    return f"""<!doctype html>
+    body = f"""<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -106,18 +132,64 @@ def _login_page(error: str | None) -> str:
             background: #38bdf8; color: #0f172a; font-size: 15px; font-weight: 600;
             cursor: pointer; }}
   button:hover {{ background: #7dd3fc; }}
+  button:disabled {{ background: #64748b; color: #e2e8f0; cursor: wait; }}
+  input:disabled {{ opacity: .6; }}
 </style>
 </head>
 <body>
   <form class="box" method="post" action="/admin/login">
     <h1>🐟 路人鱼 · 数据后台</h1>
-    <p>请输入管理密码（ADMIN_PASSWORD）</p>
-    {error_html}
-    <input type="password" name="password" placeholder="管理密码" autofocus required>
-    <button type="submit">登 录</button>
-  </form>
+    <p>请输入管理密码</p>
+    <p class="error" id="loginError" {'' if error else 'hidden'}>{html.escape(error or '')}</p>
+    <input type="password" name="password" id="loginPassword" placeholder="管理密码" autofocus required>
+    <button type="submit" id="loginButton">登 录</button>
+  </form>"""
+    # 脚本里的花括号与 f-string 冲突，单独用普通字符串拼接。
+    script = """
+<script>
+const form = document.querySelector('form');
+const button = document.getElementById('loginButton');
+const passwordInput = document.getElementById('loginPassword');
+const errorBox = document.getElementById('loginError');
+
+function setLocked(locked) {
+  button.disabled = locked;
+  passwordInput.disabled = locked;
+  button.textContent = locked ? '登录中…' : '登 录';
+}
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (button.disabled) return;
+  // 必须先取表单值再锁定：禁用后的输入框不会进 FormData
+  const payload = new URLSearchParams(new FormData(form));
+  setLocked(true);
+  errorBox.hidden = true;
+  try {
+    const response = await fetch('/admin/login', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: payload,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) {
+      location.href = data.redirect || '/admin';
+      return;  // 跳转中保持锁定态，防止重复提交
+    }
+    errorBox.textContent = data.message || ('登录失败（' + response.status + '）');
+    errorBox.hidden = false;
+  } catch (error) {
+    errorBox.textContent = '网络错误，请重试';
+    errorBox.hidden = false;
+  }
+  setLocked(false);
+  passwordInput.focus();
+  passwordInput.select();
+});
+</script>
 </body>
 </html>"""
+    return body + script
 
 
 @router.get("", response_class=HTMLResponse)
@@ -129,11 +201,30 @@ def admin_page(request: Request):
 
 @router.post("/login")
 async def admin_login(request: Request, password: str = Form("")):
+    # 页面脚本带 Accept: application/json，拿到结构化结果做内联提示；
+    # 普通表单/curl 提交仍走 HTML 页面 + 303 重定向。
+    wants_json = request.headers.get("accept", "").startswith("application/json")
+
+    def respond_error(message: str, status: int) -> Response:
+        if wants_json:
+            return JSONResponse({"ok": False, "message": message}, status_code=status)
+        return HTMLResponse(_login_page(message), status_code=status)
+
+    interval = runtime_config.get("admin_login_rate_limit_seconds")
+    if interval > 0:
+        remaining = _login_rate_limit_remaining(_client_ip(request), interval)
+        if remaining:
+            return respond_error(f"尝试过于频繁，请 {remaining} 秒后再试", 429)
+
     expected = get_admin_password().encode("utf-8")
     if not hmac.compare_digest(password.encode("utf-8"), expected):
         await asyncio.sleep(1.5)  # 拖慢暴力尝试
-        return HTMLResponse(_login_page("密码错误，请重试"), status_code=401)
-    response = RedirectResponse("/admin", status_code=303)
+        return respond_error("密码错误，请重试", 401)
+
+    if wants_json:
+        response = JSONResponse({"ok": True, "redirect": "/admin"})
+    else:
+        response = RedirectResponse("/admin", status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
         _new_session_value(),

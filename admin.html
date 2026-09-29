@@ -177,6 +177,7 @@ const CONFIG_GROUPS = [
     { key: 'session_days', label: '用户登录有效期 (天)', type: 'int', min: 1, max: 90 },
     { key: 'pending_minutes', label: '生成占额度时长 (分钟)', type: 'int', min: 1, max: 1440, hint: '生成失败会自动退还额度' },
     { key: 'admin_session_days', label: '后台会话有效期 (天)', type: 'int', min: 1, max: 90 },
+    { key: 'admin_login_rate_limit_seconds', label: '登录限速间隔 (秒)', type: 'int', min: 0, max: 60, hint: '同一 IP 两次登录尝试的最小间隔，0 为关闭；防密码爆破' },
     { key: 'admin_password', label: '自定义后台密码', type: 'password', hint: '留空表示不改；修改保存后需用新密码重新登录' },
   ]},
 ];
