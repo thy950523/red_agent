@@ -5,3 +5,9 @@ __pycache__/
 .impeccable/
 .DS_Store
 *.pyc
+.admin_password
+.generation_quota.sqlite3*
+runtime_config*.json
+
+validation/photos/
+validation/labels.jsonl

@@ -12,6 +12,7 @@ require.cache[require.resolve(configPath)] = {
 
 let page;
 let chooseOptions;
+global.getApp = () => ({ ensureLogin: callback => callback(null, 'test-token', null, 'test-open-id'), globalData: {} });
 global.Page = definition => {
   page = definition;
   page.data = { ...definition.data };

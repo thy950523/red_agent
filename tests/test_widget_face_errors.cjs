@@ -11,6 +11,7 @@ require.cache[require.resolve(configPath)] = {
 };
 
 let page;
+global.getApp = () => ({ ensureLogin: callback => callback(null, 'test-token', { remaining: 5 }, 'test-open-id'), globalData: {} });
 const responses = [
   { statusCode: 422, data: JSON.stringify({ detail: { code: 'NO_FACE', message: '请上传一张包含人脸的图片' } }) },
   { statusCode: 413, data: JSON.stringify({ detail: '照片不能超过 20 MB' }) },

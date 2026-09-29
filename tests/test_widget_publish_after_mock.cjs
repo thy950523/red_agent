@@ -13,6 +13,7 @@ require.cache[require.resolve(configPath)] = {
 let page;
 let published;
 let uploadedTo;
+global.getApp = () => ({ ensureLogin: callback => callback(null, 'test-token', null, 'test-open-id'), globalData: {} });
 global.Page = definition => {
   page = definition;
   page.data = { ...definition.data };
@@ -35,6 +36,12 @@ page.data.fishId = '22';
 page.data.imageUrl = '/tmp/portrait.png';
 page.publishNote();
 
+assert.equal(uploadedTo, undefined);
+assert.equal(published, undefined);
+page.generateImage();
+assert.equal(page.data.generatedImage, 'https://api.example.test/result/abc.png');
+page.publishNote();
+
 assert.equal(uploadedTo, 'https://api.example.test/generate');
 assert.equal(JSON.parse(published.mediaInfo).image_resources[0].url, 'https://api.example.test/result/abc.png');
-console.log('publish generates an image URL then opens the editor');
+console.log('publish opens the editor only after image generation');

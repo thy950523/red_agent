@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>路人鱼 · 数据统计</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f172a; color: #e2e8f0;
+         font-family: system-ui, -apple-system, "PingFang SC", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+           padding: 18px 24px; border-bottom: 1px solid #1e293b; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .spacer { flex: 1; }
+  header time { color: #94a3b8; font-size: 13px; }
+  button, .pager button { padding: 7px 14px; border: 0; border-radius: 8px;
+          background: #1e293b; color: #e2e8f0; font-size: 13px; cursor: pointer; }
+  button:hover { background: #334155; }
+  form { display: inline; margin: 0; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 60px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+           gap: 14px; }
+  .kpi { background: #1e293b; border: 1px solid #334155; border-radius: 14px;
+         padding: 16px 18px; }
+  .kpi .label { color: #94a3b8; font-size: 13px; }
+  .kpi .value { font-size: 30px; font-weight: 700; margin-top: 4px; }
+  .kpi .sub { color: #64748b; font-size: 12px; margin-top: 4px; }
+  section.panel { background: #1e293b; border: 1px solid #334155; border-radius: 14px;
+                  padding: 18px; margin-top: 18px; }
+  section.panel h2 { font-size: 15px; margin: 0 0 14px; color: #cbd5e1; }
+  .chart { display: flex; align-items: flex-end; gap: 3px; height: 170px; }
+  .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column;
+             justify-content: flex-end; height: 100%; }
+  .bar { background: linear-gradient(180deg, #38bdf8, #0ea5e9); border-radius: 3px 3px 0 0;
+         min-height: 2px; }
+  .bar-col:hover .bar { background: #7dd3fc; }
+  .bar-label { display: block; height: 16px; margin-top: 6px; color: #64748b;
+               font-size: 10px; white-space: nowrap; overflow: visible; }
+  .empty { color: #64748b; font-size: 13px; padding: 8px 2px; }
+  .fishbar { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; }
+  .fishbar .name { width: 90px; color: #cbd5e1; }
+  .fishbar .track { flex: 1; height: 10px; background: #0f172a; border-radius: 5px;
+                    overflow: hidden; }
+  .fishbar .fill { height: 100%; background: #38bdf8; }
+  .exports { display: flex; gap: 12px; flex-wrap: wrap; }
+  .exports a { display: inline-block; padding: 9px 18px; border-radius: 9px;
+               background: #0ea5e9; color: #0f172a; font-size: 13px; font-weight: 600;
+               text-decoration: none; }
+  .exports a:hover { background: #7dd3fc; }
+  .config-group { margin: 0 0 16px; }
+  .config-group h3 { font-size: 13px; color: #94a3b8; margin: 0 0 8px; font-weight: 600; }
+  .config-row { display: grid; grid-template-columns: 220px 1fr; gap: 12px;
+                align-items: start; padding: 8px 0; border-top: 1px solid #263244; }
+  .config-row .name { color: #cbd5e1; font-size: 13px; padding-top: 8px; }
+  .config-row .name .badge { display: inline-block; margin-left: 6px; padding: 1px 7px;
+        border-radius: 999px; background: #164e63; color: #7dd3fc; font-size: 11px; }
+  .config-row .control input[type="text"], .config-row .control input[type="number"],
+  .config-row .control input[type="password"], .config-row .control select,
+  .config-row .control textarea { width: 100%; padding: 8px 10px; border-radius: 8px;
+        border: 1px solid #475569; background: #0f172a; color: #e2e8f0; font-size: 13px;
+        outline: none; font-family: inherit; }
+  .config-row .control textarea { min-height: 120px; resize: vertical; line-height: 1.6; }
+  .config-row .control input:focus, .config-row .control select:focus,
+  .config-row .control textarea:focus { border-color: #38bdf8; }
+  .config-row .control .hint { color: #64748b; font-size: 12px; margin-top: 4px; }
+  .config-row .control .inline { display: flex; align-items: center; gap: 10px; }
+  .config-row .control input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0ea5e9; }
+  .config-row .control .toggle-label { color: #94a3b8; font-size: 13px; }
+  .config-row .control .link-btn { background: none; border: 0; padding: 0;
+        color: #7dd3fc; font-size: 12px; cursor: pointer; text-decoration: underline; }
+  .config-actions { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+  .config-actions button { padding: 9px 22px; background: #0ea5e9; color: #0f172a;
+        font-size: 14px; font-weight: 600; }
+  .config-actions button:hover { background: #7dd3fc; }
+  .config-status { color: #94a3b8; font-size: 13px; }
+  .config-status.ok { color: #4ade80; }
+  .config-status.err { color: #f87171; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 14px; }
+  figure.card { margin: 0; background: #0f172a; border: 1px solid #334155;
+                border-radius: 12px; overflow: hidden; }
+  figure.card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+                    background: #1e293b; }
+  figure.card figcaption { padding: 10px 12px; font-size: 12px; }
+  figure.card .meta { display: flex; justify-content: space-between; color: #94a3b8; }
+  figure.card .meta .fish { color: #7dd3fc; font-weight: 600; }
+  figure.card .actions { display: flex; gap: 8px; margin-top: 8px; }
+  figure.card .actions a, figure.card .actions button { flex: 1; text-align: center;
+          text-decoration: none; padding: 5px 0; border-radius: 7px; font-size: 12px; }
+  figure.card .actions a { background: #1e293b; color: #7dd3fc; }
+  figure.card .actions button { padding: 5px 0; }
+  .pager { display: flex; align-items: center; justify-content: center; gap: 14px;
+           margin-top: 16px; color: #94a3b8; font-size: 13px; }
+  @media (max-width: 640px) { .chart .bar-label { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐟 路人鱼 · 数据统计</h1>
+  <span class="spacer"></span>
+  <time id="latestAt"></time>
+  <button id="refresh" type="button">刷新</button>
+  <form method="post" action="/admin/logout"><button type="submit">退出</button></form>
+</header>
+<main>
+  <section class="cards" id="cards"></section>
+  <section class="panel">
+    <h2>每小时生成统计（近 48 小时，北京时间）</h2>
+    <div class="chart" id="hourly"></div>
+    <p class="empty">柱高 = 生成张数；悬停查看参与人数。</p>
+  </section>
+  <section class="panel">
+    <h2>每天生成统计（近 30 天，北京时间）</h2>
+    <div class="chart" id="daily"></div>
+    <p class="empty">柱高 = 生成张数；悬停查看参与人数。</p>
+  </section>
+  <section class="panel">
+    <h2>路人鱼人气榜</h2>
+    <div id="topFish"><p class="empty">暂无数据</p></div>
+  </section>
+  <section class="panel">
+    <h2>数据导出（CSV，Excel 可直接打开）</h2>
+    <div class="exports">
+      <a href="/admin/export/daily.csv" download>⬇ 按天汇总</a>
+      <a href="/admin/export/hourly.csv" download>⬇ 按小时明细</a>
+      <a href="/admin/export/records.csv" download>⬇ 生成记录明细</a>
+    </div>
+    <p class="empty">按天：每日参与人数与生成张数；按小时：每个时段的统计；明细：每条生成记录的时间、鱼编号、链接与访客标识。</p>
+  </section>
+  <section class="panel">
+    <h2>运行时配置</h2>
+    <p class="empty">保存后立即生效，无需重启服务。ARK_API_KEY、小红书应用密钥等敏感信息仍通过环境变量配置。</p>
+    <div id="configGroups"></div>
+    <div class="config-actions">
+      <button id="saveConfig" type="button">保存配置</button>
+      <span id="configStatus" class="config-status"></span>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>生成的图片（<span id="total"></span> 张）</h2>
+    <div class="grid" id="grid"></div>
+    <div class="pager">
+      <button id="prev" type="button">上一页</button>
+      <span id="pageInfo"></span>
+      <button id="next" type="button">下一页</button>
+    </div>
+  </section>
+</main>
+<script>
+let page = 1;
+let configValues = {};
+let pristineConfig = {};
+let configOverridden = new Set();
+
+const CONFIG_GROUPS = [
+  { name: '运营开关', items: [
+    { key: 'generation_enabled', label: '生成功能开关', type: 'bool', hint: '关闭后立即停止出图，照片匹配不受影响' },
+    { key: 'auth_enabled', label: '小红书登录开关', type: 'bool', hint: '关闭即游客模式：无需登录、也不限生成次数' },
+    { key: 'daily_limit', label: '每人每天生成上限', type: 'int', min: 1, max: 200, hint: '按北京时间零点重置' },
+    { key: 'max_upload_mb', label: '上传照片上限 (MB)', type: 'int', min: 1, max: 50 },
+  ]},
+  { name: '生图设置', items: [
+    { key: 'ark_model', label: '生图模型', type: 'text' },
+    { key: 'generation_size', label: '生成尺寸', type: 'select', choices: ['1K', '2K', '4K'], hint: '尺寸越大越慢、成本越高' },
+    { key: 'watermark', label: '生成图片加水印', type: 'bool' },
+    { key: 'generation_prompt', label: '生图提示词', type: 'prompt', hint: '每次生成都会把当时用的提示词记入归档元数据' },
+  ]},
+  { name: '人脸匹配阈值', items: [
+    { key: 'face_check_enabled', label: '上传后进行人脸检测', type: 'bool', hint: '开启：上传照片先做检测，无脸或模糊会提示重传；关闭（默认）：不做拦截，未检出人脸也照常出匹配' },
+    { key: 'face_confidence_threshold', label: '人脸置信度门槛 (0-1)', type: 'float', min: 0.05, max: 1 },
+    { key: 'min_face_size_px', label: '最小人脸尺寸 (px)', type: 'int', min: 16, max: 500 },
+    { key: 'sharpness_threshold', label: '清晰度门槛 (拉普拉斯方差)', type: 'float', min: 0, max: 1000, hint: '调高会更多提示"人脸不够清晰"' },
+    { key: 'match_count', label: '返回匹配数量', type: 'int', min: 1, max: 10, hint: '第 1 个作为主匹配，其余作为备选' },
+  ]},
+  { name: '会话与密码', items: [
+    { key: 'session_days', label: '用户登录有效期 (天)', type: 'int', min: 1, max: 90 },
+    { key: 'pending_minutes', label: '生成占额度时长 (分钟)', type: 'int', min: 1, max: 1440, hint: '生成失败会自动退还额度' },
+    { key: 'admin_session_days', label: '后台会话有效期 (天)', type: 'int', min: 1, max: 90 },
+    { key: 'admin_password', label: '自定义后台密码', type: 'password', hint: '留空表示不改；修改保存后需用新密码重新登录' },
+  ]},
+];
+
+async function loadConfig() {
+  const data = await api('/admin/api/config');
+  configValues = data.values;
+  pristineConfig = { ...data.values };
+  configOverridden = new Set(data.overridden);
+  renderConfig();
+}
+
+function controlHtml(field) {
+  const value = configValues[field.key];
+  if (field.type === 'bool') {
+    return `<label class="inline"><input type="checkbox" data-key="${field.key}" ${value ? 'checked' : ''}>
+            <span class="toggle-label">${value ? '已开启' : '已关闭'}</span></label>`;
+  }
+  if (field.type === 'select') {
+    return `<select data-key="${field.key}">` + field.choices.map(choice =>
+      `<option ${choice === value ? 'selected' : ''}>${choice}</option>`).join('') + '</select>';
+  }
+  if (field.type === 'prompt') {
+    return `<textarea data-key="${field.key}"></textarea>`;
+  }
+  if (field.type === 'password') {
+    const customized = configOverridden.has(field.key);
+    return `<div class="inline"><input type="password" data-key="${field.key}" autocomplete="new-password"
+              placeholder="${customized ? '已自定义，留空保持不变' : '未自定义（使用环境变量/默认密码）'}">
+            ${customized ? '<button type="button" class="link-btn" id="clearPassword">恢复环境变量/默认密码</button>' : ''}</div>`;
+  }
+  if (field.type === 'text') {
+    return `<input type="text" data-key="${field.key}">`;
+  }
+  const step = field.type === 'float' ? 'step="any"' : '';
+  return `<input type="number" data-key="${field.key}" value="" ${step}
+          min="${field.min ?? ''}" max="${field.max ?? ''}">`;
+}
+
+function renderConfig() {
+  document.getElementById('configGroups').innerHTML = CONFIG_GROUPS.map(group => `
+    <div class="config-group">
+      <h3>${group.name}</h3>
+      ${group.items.map(field => `
+        <div class="config-row">
+          <div class="name">${field.label}${configOverridden.has(field.key) ? '<span class="badge">自定义</span>' : ''}</div>
+          <div class="control">${controlHtml(field)}
+            ${field.hint ? `<div class="hint">${field.hint}</div>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>`).join('');
+  // 值通过 DOM 赋值而不是拼进 HTML，避免提示词等长文本被特殊字符破坏。
+  for (const field of CONFIG_GROUPS.flatMap(group => group.items)) {
+    const el = document.querySelector(`[data-key="${field.key}"]`);
+    if (!el || field.type === 'bool' || field.type === 'select') continue;
+    if (field.type === 'password') continue; // 密码不回显
+    el.value = configValues[field.key];
+  }
+  const clear = document.getElementById('clearPassword');
+  if (clear) clear.addEventListener('click', async () => {
+    await saveConfig({ admin_password: null });
+  });
+}
+
+function setConfigStatus(text, kind) {
+  const el = document.getElementById('configStatus');
+  el.textContent = text;
+  el.className = `config-status ${kind || ''}`;
+}
+
+async function saveConfig(extra) {
+  const payload = extra || {};
+  if (!extra) {
+    for (const field of CONFIG_GROUPS.flatMap(group => group.items)) {
+      const el = document.querySelector(`[data-key="${field.key}"]`);
+      if (!el) continue;
+      let value;
+      if (field.type === 'bool') value = el.checked;
+      else if (field.type === 'int' || field.type === 'float') {
+        if (el.value !== '') value = Number(el.value);
+      }
+      else if (field.type === 'password') { if (el.value) value = el.value; }
+      else if (field.type === 'text') { if (el.value !== '') value = el.value; }
+      else value = el.value;
+      if (value === undefined) continue;
+      // 未改动的项不提交：它们继续走默认值/环境变量回退
+      if (field.type !== 'password' && value === pristineConfig[field.key]) continue;
+      payload[field.key] = value;
+    }
+  }
+  const passwordChanged = 'admin_password' in payload && payload.admin_password;
+  try {
+    const response = await fetch('/admin/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (response.status === 401) { location.href = '/admin'; return; }
+    const data = await response.json();
+    if (!response.ok) { setConfigStatus(data.detail || '保存失败', 'err'); return; }
+    configValues = data.values;
+    pristineConfig = { ...data.values };
+    configOverridden = new Set(data.overridden);
+    if (passwordChanged) {
+      alert('后台密码已更新，请使用新密码重新登录');
+      location.href = '/admin';
+      return;
+    }
+    renderConfig();
+    setConfigStatus('已保存 ✓', 'ok');
+  } catch (error) {
+    setConfigStatus('保存失败：' + error, 'err');
+  }
+}
+
+async function api(path) {
+  const response = await fetch(path);
+  if (response.status === 401) { location.href = '/admin'; throw new Error('unauthorized'); }
+  if (!response.ok) throw new Error(path + ' -> ' + response.status);
+  return response.json();
+}
+
+function renderSummary(data) {
+  const perUser = data.totalParticipants ? (data.totalImages / data.totalParticipants).toFixed(1) : '—';
+  document.getElementById('latestAt').textContent = data.latestAt ? `最新生成：${data.latestAt}` : '暂无生成记录';
+  document.getElementById('cards').innerHTML = [
+    ['参与人数', data.totalParticipants, `今日 ${data.todayParticipants} 人`],
+    ['生成图片', data.totalImages, `今日 ${data.todayImages} 张`],
+    ['人均生成', perUser, '张 / 人'],
+    ['最新生成', data.latestAt ? data.latestAt.slice(5, 10) : '—', data.latestAt || ''],
+  ].map(([label, value, sub]) => `
+    <div class="kpi">
+      <div class="label">${label}</div>
+      <div class="value">${value}</div>
+      <div class="sub">${sub}</div>
+    </div>`).join('');
+  const top = (data.topFish || []).filter(item => item.count > 0);
+  const maxCount = Math.max(1, ...top.map(item => item.count));
+  document.getElementById('topFish').innerHTML = top.length
+    ? top.map(item => `
+        <div class="fishbar">
+          <span class="name">#${item.fishId}</span>
+          <span class="track"><span class="fill" style="width:${(item.count / maxCount) * 100}%"></span></span>
+          <span class="name">${item.count} 张</span>
+        </div>`).join('')
+    : '<p class="empty">暂无数据</p>';
+}
+
+function renderChart(el, data, labelEvery) {
+  const max = Math.max(1, ...data.map(item => item.images));
+  el.innerHTML = data.map((item, index) => `
+    <div class="bar-col" title="${item.label}：生成 ${item.images} 张 / ${item.participants} 人参与">
+      <div class="bar" style="height:${Math.max(1.5, (item.images / max) * 100)}%"></div>
+      <span class="bar-label">${index % labelEvery === 0 ? item.label : ''}</span>
+    </div>`).join('');
+}
+
+function renderImages(data) {
+  document.getElementById('total').textContent = data.total;
+  document.getElementById('pageInfo').textContent = `第 ${data.page} / ${data.totalPages} 页`;
+  document.getElementById('prev').disabled = data.page <= 1;
+  document.getElementById('next').disabled = data.page >= data.totalPages;
+  document.getElementById('grid').innerHTML = data.items.length ? data.items.map(item => `
+    <figure class="card">
+      <img loading="lazy" src="${item.thumbnail || item.url}" alt=""
+           onerror="this.onerror=null;this.src='${item.url}'">
+      <figcaption>
+        <div class="meta"><span class="fish">#${item.fishId}</span><span>${item.createdAt}</span></div>
+        <div class="actions">
+          <a href="${item.url}" target="_blank" rel="noopener">打开</a>
+          <button type="button" data-url="${item.url}">复制链接</button>
+        </div>
+      </figcaption>
+    </figure>`).join('')
+    : '<p class="empty">还没有生成记录</p>';
+}
+
+document.getElementById('grid').addEventListener('click', event => {
+  const button = event.target.closest('button[data-url]');
+  if (!button) return;
+  navigator.clipboard.writeText(button.dataset.url).then(() => {
+    button.textContent = '已复制 ✓';
+    setTimeout(() => { button.textContent = '复制链接'; }, 1500);
+  });
+});
+document.getElementById('prev').addEventListener('click', () => { page -= 1; loadImages(); });
+document.getElementById('next').addEventListener('click', () => { page += 1; loadImages(); });
+document.getElementById('refresh').addEventListener('click', () => { loadAll(); });
+
+async function loadImages() { renderImages(await api(`/admin/api/images?page=${page}`)); }
+async function loadAll() {
+  const [summary, series] = await Promise.all([
+    api('/admin/api/summary'),
+    api('/admin/api/timeseries?hours=48&days=30'),
+  ]);
+  renderSummary(summary);
+  renderChart(document.getElementById('hourly'), series.hourly, 6);
+  renderChart(document.getElementById('daily'), series.daily, 2);
+  await Promise.all([loadImages(), loadConfig()]);
+}
+
+document.getElementById('saveConfig').addEventListener('click', () => saveConfig());
+loadAll();
+</script>
+</body>
+</html>

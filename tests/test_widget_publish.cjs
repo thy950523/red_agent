@@ -36,5 +36,5 @@ page.data.imageUrl = '/tmp/portrait.png';
 published = null;
 page.publishNote();
 assert.equal(published, null);
-assert.equal(lastToast, '请先配置人脸检测服务');
+assert.equal(lastToast, undefined);
 console.log('publish uses generated image URL');

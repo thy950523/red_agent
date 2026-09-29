@@ -5,132 +5,112 @@ Run with: uvicorn app:app --reload
 
 import base64
 from datetime import datetime, timezone
-from functools import lru_cache
+from hashlib import sha256
 from io import BytesIO
 import json
 import logging
 import os
 from pathlib import Path
-from threading import Lock
+from time import perf_counter
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 from uuid import uuid4
 
-import cv2
-import numpy as np
-import torch
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from admin_stats import router as admin_router
+from match_engine import EXTRACTOR, FaceProblem, match_photo
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+import runtime_config
+import widget_auth
 
 
 ROOT = Path(__file__).resolve().parent
 IMAGES = ROOT / "images"
 # 01.jpg is a collage of three characters, not one matchable character.
 FISH = sorted(IMAGES.glob("*.png"))
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024
-MODEL_NAME = "openai/clip-vit-base-patch32"
-FACE_MODEL = ROOT / "models" / "face_detection_yunet_2026may.onnx"
 Image.MAX_IMAGE_PIXELS = 20_000_000
 RESULTS = ROOT / ".results"
 ARCHIVE = ROOT / "generated_archive"
 ARK_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
-ARK_MODEL = "doubao-seedream-5-0-flash-260915"
-GENERATION_PROMPT = (
-    "请将图一的真人照片完整转化为一张风格 A 的二维卡通插画。**画面仍然是图一的画面，只是人物变成按照图二绘制的比奇堡路人鱼。**\n"
-    "**图一控制内容和布局：**保持图一的画幅比例、裁切、景别、镜头角度、人物在画面中的位置与大小、身体姿势、手势、头部朝向、表情、服装、随身物品，"
-    "以及背景主要物体的相对位置。图一拍到哪里就画到哪里，不扩图，不强制补出全身。\n"
-    "**图一的头发必须完整保留：**保留图一的发色、分缝、发际线、头发长度、发量、发束走向及具体发型，包括辫子、刘海或扎发等可见细节。"
-    "把这些头发用图二的平面卡通画法重新绘制，自然长在鱼角色的头部上。不得用图二的帽子遮住或替换图一的头发，也不得擅自改变发型。\n"
-    "**图二控制鱼类造型和画风：**将图二的简化鱼头、卡通鱼眼、鱼嘴、鱼类肤色、鳍状手臂和鱼类身体比例应用到图一的人物位置，"
-    "使所有可见身体部位都成为统一的二维卡通鱼。让鱼角色做图一的动作，并用鱼的眼神、眉形与嘴形表现图一真人的情绪。"
-    "不要照搬图二的姿势、帽子、服装或背景；图一的服装与物品要用同一套卡通画法重绘。\n"
-    "**固定风格 A：**可爱、明快的手绘二维电视动画；清晰而略有手绘起伏的深色轮廓线；鲜明协调的大色块平涂；每个主要形体最多一层简单的硬边阴影；"
-    "大而清楚的卡通眼睛；没有写实纹理、复杂光影或 3D 体积感。将图一的背景也按这套画法重绘，保留图一的地点与空间布局，可少量加入海底世界的装饰元素。\n"
-    "**严格避免：**真人脸贴在鱼身上、真实皮肤或五官、真人身体加鱼鳞或鱼尾、半写实鱼人、美人鱼尾巴、图二的帽子挡住头发、丢失或改动图一的发型、"
-    "照搬图二的服装和姿势、改变图一构图、照片质感、3D 渲染、油画笔触、塑料光泽、文字、水印、界面元素。"
-)
-logger = logging.getLogger(__name__)
+# 默认值；后台“运行时配置”里保存过的值会覆盖它们（见 runtime_config.py）。
+ARK_MODEL = runtime_config.SPEC["ark_model"]["default"]
+GENERATION_PROMPT = runtime_config.GENERATION_PROMPT_DEFAULT
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
 
 app = FastAPI(title="比奇堡路人鱼趣味匹配")
 app.mount("/images", StaticFiles(directory=IMAGES), name="images")
+app.include_router(admin_router)
 
 
-class Matcher:
-    def __init__(self):
-        from transformers import AutoProcessor, CLIPModel
-
-        self.processor = AutoProcessor.from_pretrained(MODEL_NAME)
-        self.model = CLIPModel.from_pretrained(MODEL_NAME).eval()
-        self.reference_features = torch.cat(
-            [self._encode(Image.open(path).convert("RGB")) for path in FISH]
-        )
-
-    def _encode(self, image: Image.Image) -> torch.Tensor:
-        inputs = self.processor(images=image, return_tensors="pt")
-        with torch.inference_mode():
-            result = self.model.get_image_features(**inputs)
-        vector = result.pooler_output if hasattr(result, "pooler_output") else result
-        return torch.nn.functional.normalize(vector, dim=-1)
-
-    def rank(self, image: Image.Image, count: int = 3):
-        scores = (self._encode(image) @ self.reference_features.T)[0]
-        indices = torch.topk(scores, k=min(count, len(FISH))).indices.tolist()
-        return [(FISH[index], float(scores[index])) for index in indices]
+class LoginCode(BaseModel):
+    code: str
 
 
-class FaceCounter:
-    def __init__(self):
-        self.detector = cv2.FaceDetectorYN_create(
-            str(FACE_MODEL), "", (320, 320), 0.75, 0.3, 5000
-        )
-        self.lock = Lock()
-
-    def count(self, image: Image.Image) -> int:
-        frame = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
-        height, width = frame.shape[:2]
-        if max(width, height) > 960:
-            scale = 960 / max(width, height)
-            frame = cv2.resize(
-                frame,
-                (max(1, round(width * scale)), max(1, round(height * scale))),
-                interpolation=cv2.INTER_AREA,
-            )
-        height, width = frame.shape[:2]
-        with self.lock:
-            self.detector.setInputSize((width, height))
-            _, faces = self.detector.detect(frame)
-        return 0 if faces is None else len(faces)
+@app.get("/auth/config")
+def get_widget_auth_config():
+    return {"authEnabled": widget_auth.auth_enabled()}
 
 
-@lru_cache(maxsize=1)
-def get_face_counter() -> FaceCounter:
-    return FaceCounter()
+@app.post("/auth/xhs")
+async def login_widget(payload: LoginCode):
+    if not widget_auth.auth_enabled():
+        raise HTTPException(400, "本地开发模式无需登录")
+    if not payload.code or len(payload.code) > 256:
+        raise HTTPException(400, "登录凭证无效")
+    open_id = await run_in_threadpool(widget_auth.exchange_code, payload.code)
+    token = await run_in_threadpool(widget_auth.issue_session, open_id)
+    return {"token": token, "openid": open_id,
+            "quota": await run_in_threadpool(widget_auth.quota, open_id)}
+
+
+@app.get("/auth/quota")
+async def get_widget_quota(request: Request, openid: str | None = None):
+    if not widget_auth.auth_enabled():
+        return {"limit": None, "used": 0, "remaining": None}
+    open_id = await run_in_threadpool(
+        widget_auth.require_matching_open_id, request.headers.get("authorization"), openid
+    )
+    return await run_in_threadpool(widget_auth.quota, open_id)
 
 
 def count_faces(image: Image.Image) -> int:
-    return get_face_counter().count(image)
-
-
-@lru_cache(maxsize=1)
-def get_matcher() -> Matcher:
-    return Matcher()
+    try:
+        return EXTRACTOR.detect(image)[1]
+    except FaceProblem as error:
+        if error.code == "NO_FACE":
+            return 0
+        raise
 
 
 @app.get("/")
 def demo():
-    return FileResponse(ROOT / "demo.html")
+    # 匿名访客编号：仅用于统计参与人数，不含任何个人信息。
+    response = FileResponse(ROOT / "demo.html")
+    response.set_cookie(
+        "vid", uuid4().hex, max_age=365 * 24 * 3600, httponly=True, samesite="lax"
+    )
+    return response
+
+
+def client_ip_hash(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "")
+    return sha256(ip.encode("utf-8")).hexdigest()[:16]
 
 
 async def read_image(file: UploadFile) -> Image.Image:
     if file.content_type not in {"image/jpeg", "image/png", "image/webp"}:
         raise HTTPException(400, "请上传 JPG、PNG 或 WebP 照片")
 
-    raw = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "照片不能超过 20 MB")
+    max_bytes = runtime_config.get("max_upload_mb") * 1024 * 1024
+    raw = await file.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise HTTPException(413, f"照片不能超过 {runtime_config.get('max_upload_mb')} MB")
 
     try:
         image = ImageOps.exif_transpose(Image.open(BytesIO(raw))).convert("RGB")
@@ -141,24 +121,38 @@ async def read_image(file: UploadFile) -> Image.Image:
 
 
 @app.post("/match")
-async def match(request: Request, file: UploadFile = File(...)):
+async def match(request: Request, response: Response, file: UploadFile = File(...),
+                openid: str | None = Form(None)):
+    if widget_auth.auth_enabled() and openid is not None:
+        await run_in_threadpool(widget_auth.require_matching_open_id,
+                                request.headers.get("authorization"), openid)
+    started = perf_counter()
     image = await read_image(file)
-    face_count = await run_in_threadpool(count_faces, image)
-    if face_count == 0:
-        raise HTTPException(
-            422,
-            detail={"code": "NO_FACE", "message": "请上传一张包含人脸的图片"},
-        )
-
-    # The uploaded portrait is processed in memory and is not saved on disk.
-    ranked = await run_in_threadpool(lambda: get_matcher().rank(image))
+    decode_ms = (perf_counter() - started) * 1000
+    try:
+        # Uploaded portrait stays in memory; references were loaded at import.
+        ranked, timings = await run_in_threadpool(match_photo, image)
+    except FaceProblem as error:
+        logger.info("match_rejected code=%s decode_ms=%.1f total_ms=%.1f", error.code, decode_ms, (perf_counter() - started) * 1000)
+        raise HTTPException(422, detail={"code": error.code, "message": error.message}) from None
     matches = [
         {
-            "id": path.stem,
-            "imageUrl": str(request.url_for("images", path=path.name)),
+            "id": fish_id,
+            "imageUrl": str(request.url_for("images", path=f"{fish_id}.webp")),
         }
-        for path, _score in ranked
+        for fish_id, _score in ranked
     ]
+    total_ms = (perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = ", ".join(
+        f"{name};dur={value:.2f}" for name, value in (
+            ("decode", decode_ms),
+            ("face", timings["face_detection_ms"]),
+            ("features", timings["feature_extraction_ms"]),
+            ("score", timings["scoring_ms"]),
+            ("total", total_ms),
+        )
+    )
+    logger.info("match_timing decode_ms=%.1f face_detection_ms=%.1f feature_extraction_ms=%.1f scoring_ms=%.1f total_ms=%.1f faces=%d", decode_ms, timings["face_detection_ms"], timings["feature_extraction_ms"], timings["scoring_ms"], total_ms, timings["face_count"])
     return {"match": matches[0], "alternatives": matches[1:]}
 
 
@@ -166,20 +160,22 @@ def generate_with_ark(portrait: Image.Image, fish_path: Path) -> Image.Image:
     api_key = os.environ.get("ARK_API_KEY")
     if not api_key:
         raise HTTPException(503, "生图服务尚未配置")
+    model = runtime_config.get("ark_model")
+    prompt = runtime_config.get("generation_prompt")
 
     portrait_bytes = BytesIO()
     portrait.save(portrait_bytes, format="JPEG", quality=90)
     payload = {
-        "model": ARK_MODEL,
-        "prompt": GENERATION_PROMPT,
+        "model": model,
+        "prompt": prompt,
         "image": [
             "data:image/jpeg;base64," + base64.b64encode(portrait_bytes.getvalue()).decode(),
             "data:image/png;base64," + base64.b64encode(fish_path.read_bytes()).decode(),
         ],
         "response_format": "url",
-        "size": "2K",
+        "size": runtime_config.get("generation_size"),
         "stream": False,
-        "watermark": True,
+        "watermark": runtime_config.get("watermark"),
     }
     request = UrlRequest(
         ARK_URL,
@@ -206,21 +202,32 @@ def generate_with_ark(portrait: Image.Image, fish_path: Path) -> Image.Image:
         raise HTTPException(502, "图像生成失败，请稍后重试") from None
 
 
-def archive_generated_image(image: Image.Image, fish_id: str) -> str:
+def archive_generated_image(
+    image: Image.Image, fish_id: str, vid: str | None = None,
+    ip_hash: str | None = None, open_id: str | None = None,
+) -> str:
     ARCHIVE.mkdir(parents=True, exist_ok=True)
     token = uuid4().hex
     image_path = ARCHIVE / f"{token}.png"
     pending_path = ARCHIVE / f"{token}.pending.png"
     image.save(pending_path, format="PNG")
     os.replace(pending_path, image_path)
+    thumbnail = image.copy()
+    thumbnail.thumbnail((320, 320))
+    thumb_pending = ARCHIVE / f"{token}.thumb.pending.jpg"
+    thumbnail.save(thumb_pending, format="JPEG", quality=80)
+    os.replace(thumb_pending, ARCHIVE / f"{token}.thumb.jpg")
     metadata = {
         "id": token,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "fishId": fish_id,
-        "model": ARK_MODEL,
-        "prompt": GENERATION_PROMPT,
+        "model": runtime_config.get("ark_model"),
+        "prompt": runtime_config.get("generation_prompt"),
         "imageOrder": ["uploaded_portrait", f"images/{fish_id}.png"],
         "size": {"width": image.width, "height": image.height},
+        "vid": vid,
+        "ipHash": ip_hash,
+        "openId": open_id,
     }
     (ARCHIVE / f"{token}.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -229,15 +236,34 @@ def archive_generated_image(image: Image.Image, fish_id: str) -> str:
 
 
 @app.post("/generate")
-async def generate(request: Request, fishId: str = Form(...), file: UploadFile = File(...)):
+async def generate(request: Request, fishId: str = Form(...), file: UploadFile = File(...),
+                   openid: str | None = Form(None)):
+    if not runtime_config.get("generation_enabled"):
+        raise HTTPException(503, "图片生成已临时关闭，请稍后再来")
+    open_id = None
+    if widget_auth.auth_enabled():
+        open_id = await run_in_threadpool(
+            widget_auth.require_matching_open_id, request.headers.get("authorization"), openid
+        )
     fish_path = next((path for path in FISH if path.stem == fishId), None)
     if fish_path is None:
         raise HTTPException(400, "无效的路人鱼编号")
 
     portrait = await read_image(file)
-    generated = await run_in_threadpool(generate_with_ark, portrait, fish_path)
-    token = await run_in_threadpool(archive_generated_image, generated, fishId)
-    return {"imageUrl": str(request.url_for("get_result", token=token))}
+    attempt_id = await run_in_threadpool(widget_auth.reserve, open_id) if open_id else None
+    try:
+        generated = await run_in_threadpool(generate_with_ark, portrait, fish_path)
+        vid = request.cookies.get("vid")
+        ip_hash = client_ip_hash(request)
+        token = await run_in_threadpool(archive_generated_image, generated, fishId, vid, ip_hash, open_id)
+    except Exception:
+        if attempt_id:
+            await run_in_threadpool(widget_auth.finish, attempt_id, False)
+        raise
+    if attempt_id:
+        await run_in_threadpool(widget_auth.finish, attempt_id, True)
+    return {"imageUrl": str(request.url_for("get_result", token=token)),
+            "quota": await run_in_threadpool(widget_auth.quota, open_id) if open_id else None}
 
 
 @app.get("/result/{token}", name="get_result")
