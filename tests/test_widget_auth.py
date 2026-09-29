@@ -71,7 +71,7 @@ def test_failed_generation_releases_quota(client, monkeypatch):
 
 def test_local_mode_skips_login_and_quota(client, monkeypatch):
     monkeypatch.setenv("WIDGET_AUTH_ENABLED", "0")
-    assert client.get("/auth/config").json() == {"authEnabled": False}
+    assert client.get("/auth/config").json()["authEnabled"] is False
     response = client.post(
         "/generate", data={"fishId": "22"},
         files={"file": ("portrait.png", photo(), "image/png")},

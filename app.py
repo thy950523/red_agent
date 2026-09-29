@@ -53,7 +53,15 @@ class LoginCode(BaseModel):
 
 @app.get("/auth/config")
 def get_widget_auth_config():
-    return {"authEnabled": widget_auth.auth_enabled()}
+    return {
+        "authEnabled": widget_auth.auth_enabled(),
+        # 小组件发布笔记时预填的标题/正文/话题，后台「小红书发布」可改。
+        "postNote": {
+            "title": runtime_config.get("post_note_title"),
+            "content": runtime_config.get("post_note_content"),
+            "tags": runtime_config.get("post_note_tags"),
+        },
+    }
 
 
 @app.post("/auth/xhs")

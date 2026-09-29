@@ -131,6 +131,7 @@ def test_config_validation_rejects_bad_values():
         {"match_count": 1.5},
         {"ark_model": ""},
         {"generation_prompt": "   "},
+        {"post_note_title": "x" * 101},
     ):
         response = client.post("/admin/api/config", json=payload)
         assert response.status_code == 400, payload
@@ -151,13 +152,31 @@ def test_auth_enabled_override_beats_environment(monkeypatch):
     client = admin_client()
     monkeypatch.setenv("WIDGET_AUTH_ENABLED", "0")
     assert client.post("/admin/api/config", json={"auth_enabled": True}).status_code == 200
-    assert client.get("/auth/config").json() == {"authEnabled": True}
+    assert client.get("/auth/config").json()["authEnabled"] is True
     login_widget(client, monkeypatch, code="someone")
 
     client.post("/admin/api/config", json={"auth_enabled": False})
-    assert client.get("/auth/config").json() == {"authEnabled": False}
+    assert client.get("/auth/config").json()["authEnabled"] is False
     response = client.post("/generate", data={"fishId": "22"}, files=photo())
     assert response.status_code == 200  # 游客模式不要求登录
+
+
+def test_post_note_params_reach_widget_and_reset_to_empty():
+    client = admin_client()
+    assert client.get("/auth/config").json()["postNote"] == {"title": "", "content": "", "tags": ""}
+
+    assert client.post(
+        "/admin/api/config",
+        json={"post_note_title": "我是比奇堡路人鱼", "post_note_content": "快来测测你是哪条鱼！",
+              "post_note_tags": "路人鱼,比奇堡"},
+    ).status_code == 200
+    note = client.get("/auth/config").json()["postNote"]
+    assert note == {"title": "我是比奇堡路人鱼", "content": "快来测测你是哪条鱼！", "tags": "路人鱼,比奇堡"}
+
+    # 清空（提交 null）回落默认值，发布器不再预填
+    client.post("/admin/api/config",
+                json={"post_note_title": None, "post_note_content": None, "post_note_tags": None})
+    assert client.get("/auth/config").json()["postNote"] == {"title": "", "content": "", "tags": ""}
 
 
 def test_admin_password_override_invalidates_old_sessions(monkeypatch):

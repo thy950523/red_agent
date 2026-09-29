@@ -56,6 +56,11 @@ SPEC: dict[str, dict] = {
     "min_face_size_px": {"type": "int", "default": 48, "min": 16, "max": 500},
     "sharpness_threshold": {"type": "float", "default": 8.0, "min": 0.0, "max": 1000.0},
     "match_count": {"type": "int", "default": 3, "min": 1, "max": 10},
+    # 小组件「发布」时 xhs.postNote 预填的笔记内容，经 /auth/config 下发；留空则不预填。
+    # 平台自身还会限制标题约 20 字、正文约 1000 字，超长部分由发布器处理。
+    "post_note_title": {"type": "str", "default": "", "max_length": 100},
+    "post_note_content": {"type": "str", "default": "", "max_length": 3000},
+    "post_note_tags": {"type": "str", "default": "", "max_length": 500},
 }
 
 # RLock：update() 持锁期间还要调 effective_values()。

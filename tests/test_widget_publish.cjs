@@ -13,6 +13,7 @@ require.cache[require.resolve(configPath)] = {
 let page;
 let published;
 let lastToast;
+global.getApp = () => ({ globalData: { postNote: { title: '我是路人鱼', content: '来看看你像谁', tags: '路人鱼' } } });
 global.Page = definition => {
   page = definition;
   page.data = { ...definition.data };
@@ -31,10 +32,13 @@ page.data.generatedImage = 'https://example.test/result/abc.png';
 page.publishNote();
 
 assert.equal(JSON.parse(published.mediaInfo).image_resources[0].url, page.data.generatedImage);
+assert.equal(published.title, '我是路人鱼');
+assert.equal(published.content, '来看看你像谁');
+assert.equal(published.tags, '路人鱼');
 page.data.generatedImage = '';
 page.data.imageUrl = '/tmp/portrait.png';
 published = null;
 page.publishNote();
 assert.equal(published, null);
 assert.equal(lastToast, undefined);
-console.log('publish uses generated image URL');
+console.log('publish uses generated image URL and backend-provided note fields');

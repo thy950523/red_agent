@@ -166,6 +166,11 @@ const CONFIG_GROUPS = [
     { key: 'watermark', label: '生成图片加水印', type: 'bool' },
     { key: 'generation_prompt', label: '生图提示词', type: 'prompt', hint: '每次生成都会把当时用的提示词记入归档元数据' },
   ]},
+  { name: '小红书发布', items: [
+    { key: 'post_note_title', label: '笔记标题预填', type: 'text', allowEmpty: true, hint: '点「发布」时 postNote 预填的标题，清空保存即恢复不预填；平台约限 20 字' },
+    { key: 'post_note_content', label: '笔记正文预填', type: 'textarea', allowEmpty: true, hint: '发布器预填的正文文案，平台约限 1000 字' },
+    { key: 'post_note_tags', label: '笔记话题预填', type: 'text', allowEmpty: true, hint: '按小组件 postNote 要求的话题格式填写' },
+  ]},
   { name: '人脸匹配阈值', items: [
     { key: 'face_check_enabled', label: '上传后进行人脸检测', type: 'bool', hint: '开启：上传照片先做检测，无脸或模糊会提示重传；关闭（默认）：不做拦截，未检出人脸也照常出匹配' },
     { key: 'face_confidence_threshold', label: '人脸置信度门槛 (0-1)', type: 'float', min: 0.05, max: 1 },
@@ -202,6 +207,9 @@ function controlHtml(field) {
   }
   if (field.type === 'prompt') {
     return `<textarea data-key="${field.key}"></textarea>`;
+  }
+  if (field.type === 'textarea') {
+    return `<textarea data-key="${field.key}" style="min-height:72px"></textarea>`;
   }
   if (field.type === 'password') {
     const customized = configOverridden.has(field.key);
@@ -260,7 +268,10 @@ async function saveConfig(extra) {
         if (el.value !== '') value = Number(el.value);
       }
       else if (field.type === 'password') { if (el.value) value = el.value; }
-      else if (field.type === 'text') { if (el.value !== '') value = el.value; }
+      else if (field.type === 'text' || field.type === 'textarea') {
+        if (el.value !== '') value = el.value;
+        else if (field.allowEmpty && pristineConfig[field.key]) value = null; // 清空即恢复默认
+      }
       else value = el.value;
       if (value === undefined) continue;
       // 未改动的项不提交：它们继续走默认值/环境变量回退

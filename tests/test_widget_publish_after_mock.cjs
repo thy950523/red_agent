@@ -13,7 +13,10 @@ require.cache[require.resolve(configPath)] = {
 let page;
 let published;
 let uploadedTo;
-global.getApp = () => ({ ensureLogin: callback => callback(null, 'test-token', null, 'test-open-id'), globalData: {} });
+global.getApp = () => ({
+  ensureLogin: callback => callback(null, 'test-token', null, 'test-open-id'),
+  globalData: { postNote: { title: '', content: '后台预填正文', tags: '' } }
+});
 global.Page = definition => {
   page = definition;
   page.data = { ...definition.data };
@@ -44,4 +47,6 @@ page.publishNote();
 
 assert.equal(uploadedTo, 'https://api.example.test/generate');
 assert.equal(JSON.parse(published.mediaInfo).image_resources[0].url, 'https://api.example.test/result/abc.png');
+assert.equal(published.title, '');
+assert.equal(published.content, '后台预填正文');
 console.log('publish opens the editor only after image generation');
