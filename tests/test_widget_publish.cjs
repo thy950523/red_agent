@@ -13,7 +13,10 @@ require.cache[require.resolve(configPath)] = {
 let page;
 let published;
 let lastToast;
-global.getApp = () => ({ globalData: { postNote: { title: '我是路人鱼', content: '来看看你像谁', tags: '路人鱼' } } });
+global.getApp = () => ({
+  globalData: { postNote: { title: '我是路人鱼', content: '来看看你像谁', tags: '路人鱼' } },
+  fetchPostNote(callback) { callback(this.globalData.postNote); }
+});
 global.Page = definition => {
   page = definition;
   page.data = { ...definition.data };

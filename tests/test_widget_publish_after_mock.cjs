@@ -15,7 +15,8 @@ let published;
 let uploadedTo;
 global.getApp = () => ({
   ensureLogin: callback => callback(null, 'test-token', null, 'test-open-id'),
-  globalData: { postNote: { title: '', content: '后台预填正文', tags: '' } }
+  globalData: { postNote: { title: '', content: '后台预填正文', tags: '' } },
+  fetchPostNote(callback) { callback(this.globalData.postNote); }
 });
 global.Page = definition => {
   page = definition;
